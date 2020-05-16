@@ -336,6 +336,7 @@ def train_or_eval(config: configure_pretraining.PretrainingConfig):
       per_host_input_for_training=is_per_host)
 
   session_config = tf.ConfigProto()
+  session_config.gpu_options.allow_growth=True
   session_config.gpu_options.visible_device_list = str(hvd.local_rank())
 
   run_config = tf.estimator.tpu.RunConfig(
