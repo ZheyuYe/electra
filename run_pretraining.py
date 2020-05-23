@@ -74,6 +74,7 @@ class PretrainingModel(object):
     fake_data = self._get_fake_data(masked_inputs, mlm_output.logits)
     self.mlm_output = mlm_output
     self.total_loss = config.gen_weight * mlm_output.loss
+    self.mlm_loss = mlm_output.loss
 
     # Discriminator
     disc_output = None
@@ -84,6 +85,7 @@ class PretrainingModel(object):
       disc_output = self._get_discriminator_output(
           fake_data.inputs, discriminator, fake_data.is_fake_tokens)
       self.total_loss += config.disc_weight * disc_output.loss
+      self.disc_loss = disc_output.loss
 
     # Evaluation
     eval_fn_inputs = {
@@ -285,7 +287,7 @@ def model_fn_builder(config: configure_pretraining.PretrainingConfig):
           loss=model.total_loss,
           train_op=train_op,
           training_hooks=[training_utils.ETAHook(
-              {} if config.use_tpu else dict(loss=model.total_loss),
+              {} if config.use_tpu else dict(total_loss=model.total_loss, mlm_loss=model.mlm_loss, disc_loss=model.disc_loss),
               config.num_train_steps, config.iterations_per_loop,
               config.use_tpu)]
       )
@@ -295,7 +297,7 @@ def model_fn_builder(config: configure_pretraining.PretrainingConfig):
           loss=model.total_loss,
           eval_metrics=model.eval_metrics,
           evaluation_hooks=[training_utils.ETAHook(
-              {} if config.use_tpu else dict(loss=model.total_loss),
+              {} if config.use_tpu else dict(total_loss=model.total_loss, mlm_loss=model.mlm_loss, disc_loss=model.disc_loss),
               config.num_eval_steps, config.iterations_per_loop,
               config.use_tpu, is_training=False)])
     else:
