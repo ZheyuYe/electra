@@ -1,7 +1,8 @@
 {
     "model_size": "small",
     "task_names": ["squad"],
-    "learning_rate": 2e-5,
+    "learning_rate": 3e-4,
     "layerwise_lr_decay": -1,
-    "train_batch_size": 48
+    "train_batch_size": 32,
+    "weight_decay_rate": 0
 }

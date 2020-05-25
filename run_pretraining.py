@@ -22,8 +22,10 @@ from __future__ import print_function
 import argparse
 import collections
 import json
+import os
 
 import tensorflow.compat.v1 as tf
+import horovod.tensorflow as hvd
 
 import configure_pretraining
 from model import modeling
@@ -309,12 +311,19 @@ def model_fn_builder(config: configure_pretraining.PretrainingConfig):
 
 def train_or_eval(config: configure_pretraining.PretrainingConfig):
   """Run pre-training or evaluate the pre-trained model."""
+  # initialize horovod
+  hvd.init()
   if config.do_train == config.do_eval:
     raise ValueError("Exactly one of `do_train` or `do_eval` must be True.")
   if config.debug:
     utils.rmkdir(config.model_dir)
   utils.heading("Config:")
   utils.log_config(config)
+
+  config.model_dir = config.model_dir if hvd.rank() == 0 else \
+      os.path.join(config.model_dir, str(hvd.rank()))
+  config.train_batch_size = config.train_batch_size // hvd.size()
+  config.eval_batch_size = config.eval_batch_size // hvd.size()
 
   is_per_host = tf.estimator.tpu.InputPipelineConfig.PER_HOST_V2
   tpu_cluster_resolver = None
@@ -327,10 +336,16 @@ def train_or_eval(config: configure_pretraining.PretrainingConfig):
                   config.num_tpu_cores),
       tpu_job_name=config.tpu_job_name,
       per_host_input_for_training=is_per_host)
+
+  session_config = tf.ConfigProto()
+  session_config.gpu_options.allow_growth=True
+  session_config.gpu_options.visible_device_list = str(hvd.local_rank())
+
   run_config = tf.estimator.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       model_dir=config.model_dir,
       save_checkpoints_steps=config.save_checkpoints_steps,
+      session_config=session_config,
       tpu_config=tpu_config)
   model_fn = model_fn_builder(config=config)
   estimator = tf.estimator.tpu.TPUEstimator(
@@ -342,12 +357,13 @@ def train_or_eval(config: configure_pretraining.PretrainingConfig):
 
   if config.do_train:
     utils.heading("Running training")
-    estimator.train(input_fn=pretrain_data.get_input_fn(config, True),
-                    max_steps=config.num_train_steps)
+    hooks = [hvd.BroadcastGlobalVariablesHook(0)]
+    estimator.train(input_fn=pretrain_data.get_input_fn(config, True, hvd),
+                    max_steps=config.num_train_steps, hooks=hooks)
   if config.do_eval:
     utils.heading("Running evaluation")
     result = estimator.evaluate(
-        input_fn=pretrain_data.get_input_fn(config, False),
+        input_fn=pretrain_data.get_input_fn(config, False, hvd),
         steps=config.num_eval_steps)
     for key in sorted(result.keys()):
       utils.log("  {:} = {:}".format(key, str(result[key])))

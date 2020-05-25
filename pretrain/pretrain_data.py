@@ -20,6 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
+import re
 
 import numpy as np
 import tensorflow.compat.v1 as tf
@@ -29,13 +30,28 @@ from model import tokenization
 from util import utils
 
 
-def get_input_fn(config: configure_pretraining.PretrainingConfig, is_training,
+def get_input_fn(config: configure_pretraining.PretrainingConfig, is_training, hvd=None,
                  num_cpu_threads=4):
   """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
   input_files = []
   for input_pattern in config.pretrain_tfrecords.split(","):
     input_files.extend(tf.io.gfile.glob(input_pattern))
+
+  if hvd:
+      input_files_local = []
+      for input_file in input_files:
+          fname = input_file.split('/')[-1]
+          if re.match('^pretrain_data\.tfrecord-\d+-of-\d+$', fname):
+              pos_of=fname.index('of')
+              fid = int(fname[23:pos_of-1])
+              if fid % hvd.size() == hvd.rank():
+                  input_files_local.append(input_file)
+      # for debug
+      print('input_files_local size:', len(input_files_local))
+      print('hvd.rank():', hvd.rank())
+      if input_files_local:
+          input_files = input_files_local
 
   def input_fn(params):
     """The actual input function."""

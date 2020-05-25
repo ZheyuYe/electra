@@ -25,7 +25,7 @@ from __future__ import print_function
 import collections
 import re
 import tensorflow.compat.v1 as tf
-
+import horovod.tensorflow as hvd
 
 def create_optimizer(
     loss, learning_rate, num_train_steps, weight_decay_rate=0.0, use_tpu=False,
@@ -57,8 +57,13 @@ def create_optimizer(
   if use_tpu:
     optimizer = tf.tpu.CrossShardOptimizer(optimizer)
 
+  optimizer = hvd.DistributedOptimizer(optimizer)
+
   tvars = tf.trainable_variables()
-  grads = tf.gradients(loss, tvars)
+  grads_and_vars = optimizer.compute_gradients(loss, tvars)
+  grads = [grad for grad, var in grads_and_vars]
+  tvars = [var for grad, var in grads_and_vars]
+
   (grads, _) = tf.clip_by_global_norm(grads, clip_norm=1.0)
   train_op = optimizer.apply_gradients(
       zip(grads, tvars), global_step=global_step)

@@ -22,6 +22,7 @@ from __future__ import print_function
 import argparse
 import collections
 import json
+import os
 
 import tensorflow.compat.v1 as tf
 
@@ -33,6 +34,7 @@ from model import optimization
 from util import training_utils
 from util import utils
 
+import horovod.tensorflow as hvd
 
 class FinetuningModel(object):
   """Finetuning model with support for multi-task training."""
@@ -136,17 +138,21 @@ def model_fn_builder(config: configure_finetuning.FinetuningConfig, tasks,
 class ModelRunner(object):
   """Fine-tunes a model on a supervised task."""
 
-  def __init__(self, config: configure_finetuning.FinetuningConfig, tasks,
+  def __init__(self, config: configure_finetuning.FinetuningConfig, tasks, hvd,
                pretraining_config=None):
     self._config = config
     self._tasks = tasks
     self._preprocessor = preprocessing.Preprocessor(config, self._tasks)
-
+    self._hooks = [hvd.BroadcastGlobalVariablesHook(0)]
     is_per_host = tf.estimator.tpu.InputPipelineConfig.PER_HOST_V2
     tpu_cluster_resolver = None
     if config.use_tpu and config.tpu_name:
       tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
           config.tpu_name, zone=config.tpu_zone, project=config.gcp_project)
+
+    session_config = tf.ConfigProto()
+    session_config.gpu_options.visible_device_list = str(hvd.local_rank())
+
     tpu_config = tf.estimator.tpu.TPUConfig(
         iterations_per_loop=config.iterations_per_loop,
         num_shards=config.num_tpu_cores,
@@ -156,6 +162,7 @@ class ModelRunner(object):
         cluster=tpu_cluster_resolver,
         model_dir=config.model_dir,
         save_checkpoints_steps=config.save_checkpoints_steps,
+        session_config=session_config,
         save_checkpoints_secs=None,
         tpu_config=tpu_config)
 
@@ -180,7 +187,7 @@ class ModelRunner(object):
   def train(self):
     utils.log("Training for {:} steps".format(self.train_steps))
     self._estimator.train(
-        input_fn=self._train_input_fn, max_steps=self.train_steps)
+        input_fn=self._train_input_fn, max_steps=self.train_steps, hooks=self._hooks)
 
   def evaluate(self):
     return {task.name: self.evaluate_task(task) for task in self._tasks}
@@ -246,6 +253,11 @@ def write_results(config: configure_finetuning.FinetuningConfig, results):
 
 def run_finetuning(config: configure_finetuning.FinetuningConfig):
   """Run finetuning."""
+  hvd.init()
+
+  config.model_dir = config.model_dir if hvd.rank() == 0 else \
+      os.path.join(config.model_dir, str(hvd.rank()))
+  config.train_batch_size = config.train_batch_size // hvd.size()
 
   # Setup for training
   results = []
@@ -264,7 +276,7 @@ def run_finetuning(config: configure_finetuning.FinetuningConfig):
     if config.do_train:
       utils.rmkdir(config.model_dir)
 
-    model_runner = ModelRunner(config, tasks)
+    model_runner = ModelRunner(config, tasks, hvd)
     if config.do_train:
       heading("Start training")
       model_runner.train()
