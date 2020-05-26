@@ -47,10 +47,9 @@ def write_examples(job_id, args):
       do_lower_case=args.do_lower_case
   )
   log("Writing tf examples")
-  fnames = sorted(tf.io.gfile.listdir(owt_dir))
+  fnames = tf.io.gfile.listdir(owt_dir)
   fnames = [f for (i, f) in enumerate(fnames)
             if i % args.num_processes == job_id]
-  random.shuffle(fnames)
   start_time = time.time()
   for file_no, fname in enumerate(fnames):
     if file_no > 0 and file_no % 10 == 0:
@@ -64,7 +63,6 @@ def write_examples(job_id, args):
     with tarfile.open(os.path.join(owt_dir, fname)) as f:
       f.extractall(job_tmp_dir)
     extracted_files = tf.io.gfile.listdir(job_tmp_dir)
-    random.shuffle(extracted_files)
     for txt_fname in extracted_files:
       example_writer.write_examples(os.path.join(job_tmp_dir, txt_fname))
   example_writer.finish()

@@ -119,7 +119,7 @@ class ExampleWriter(object):
 
   def __init__(self, job_id, vocab_file, output_dir, max_seq_length,
                num_jobs, blanks_separate_docs, do_lower_case,
-               num_out_files=1000):
+               num_out_files=1):
     self._blanks_separate_docs = blanks_separate_docs
     tokenizer = tokenization.FullTokenizer(
         vocab_file=vocab_file,
@@ -174,10 +174,9 @@ def write_examples(job_id, args):
       do_lower_case=args.do_lower_case
   )
   log("Writing tf examples")
-  fnames = sorted(tf.io.gfile.listdir(args.corpus_dir))
+  fnames = tf.io.gfile.listdir(args.corpus_dir)
   fnames = [f for (i, f) in enumerate(fnames)
             if i % args.num_processes == job_id]
-  random.shuffle(fnames)
   start_time = time.time()
   for file_no, fname in enumerate(fnames):
     if file_no > 0:
