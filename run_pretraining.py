@@ -86,6 +86,7 @@ class PretrainingModel(object):
           embedding_size=embedding_size)
       disc_output = self._get_discriminator_output(
           fake_data.inputs, discriminator, fake_data.is_fake_tokens)
+      self.total_output = [masked_inputs, mlm_output, disc_output]
       self.total_loss += config.disc_weight * disc_output.loss
       self.disc_loss = disc_output.loss
 
@@ -212,10 +213,10 @@ class PretrainingModel(object):
       preds = tf.cast(tf.round((tf.sign(logits) + 1) / 2), tf.int32)
       DiscOutput = collections.namedtuple(
           "DiscOutput", ["loss", "per_example_loss", "probs", "preds",
-                         "labels"])
+                         "logits","labels"])
       return DiscOutput(
           loss=loss, per_example_loss=per_example_loss, probs=probs,
-          preds=preds, labels=labels,
+          preds=preds, labels=labels, logits=logits,
       )
 
   def _get_fake_data(self, inputs, mlm_logits):
