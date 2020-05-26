@@ -139,7 +139,7 @@ class ModelRunner(object):
   """Fine-tunes a model on a supervised task."""
 
   def __init__(self, config: configure_finetuning.FinetuningConfig, tasks, hvd,
-               pretraining_config=None):
+               gpu_list, pretraining_config=None):
     self._config = config
     self._tasks = tasks
     self._preprocessor = preprocessing.Preprocessor(config, self._tasks)
@@ -150,8 +150,15 @@ class ModelRunner(object):
       tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
           config.tpu_name, zone=config.tpu_zone, project=config.gcp_project)
 
+    device_map = {
+        0: 0,
+        1: 2,
+        2: 1,
+        3: 2
+    }
+    device_map = {k:int(v) for k,v in enumerate(gpu_list.split(','))}
     session_config = tf.ConfigProto()
-    session_config.gpu_options.visible_device_list = str(hvd.local_rank())
+    session_config.gpu_options.visible_device_list = str(device_map[hvd.rank()])
 
     tpu_config = tf.estimator.tpu.TPUConfig(
         iterations_per_loop=config.iterations_per_loop,
@@ -251,7 +258,7 @@ def write_results(config: configure_finetuning.FinetuningConfig, results):
   utils.write_pickle(results, config.results_pkl)
 
 
-def run_finetuning(config: configure_finetuning.FinetuningConfig):
+def run_finetuning(gpu_list: str, config: configure_finetuning.FinetuningConfig):
   """Run finetuning."""
   hvd.init()
 
@@ -276,7 +283,7 @@ def run_finetuning(config: configure_finetuning.FinetuningConfig):
     if config.do_train:
       utils.rmkdir(config.model_dir)
 
-    model_runner = ModelRunner(config, tasks, hvd)
+    model_runner = ModelRunner(config, tasks, hvd, gpu_list)
     if config.do_train:
       heading("Start training")
       model_runner.train()
@@ -319,6 +326,9 @@ def main():
                       help="Location of data files (model weights, etc).")
   parser.add_argument("--model-name", required=True,
                       help="The name of the model being fine-tuned.")
+  parser.add_argument("--gpu-list", type=str,
+                      help="The list of designated gpus to like '0,1,0,1'"
+                      "indicating fine-tuning on the node1:0,1;node2:0,1")
   parser.add_argument("--hparams", default="{}",
                       help="JSON dict of model hyperparameters.")
   args = parser.parse_args()
@@ -327,7 +337,7 @@ def main():
   else:
     hparams = json.loads(args.hparams)
   tf.logging.set_verbosity(tf.logging.ERROR)
-  run_finetuning(configure_finetuning.FinetuningConfig(
+  run_finetuning(args.gpu_list, configure_finetuning.FinetuningConfig(
       args.model_name, args.data_dir, **hparams))
 
 

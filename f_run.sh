@@ -2,7 +2,8 @@
 #run finetuning script
 export TF_FORCE_GPU_ALLOW_GROWTH="true"
 
-horovodrun -np 4 -H localhost:4 python3 run_finetuning.py \
+horovodrun -np 1 -H localhost:1 python3 run_finetuning.py \
     --data-dir /home/ubuntu/enlei_electra/ \
+    --gpu-list 0 \
     --model-name electra_small_owt \
-    --hparams squad_config.json \
+    --hparams finetune_config.json \
