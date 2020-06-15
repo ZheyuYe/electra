@@ -71,6 +71,7 @@ class FinetuningConfig(object):
     # sizing
     self.max_seq_length = 128
     self.train_batch_size = 32
+    self.grad_interval = 1
     self.eval_batch_size = 32
     self.predict_batch_size = 32
     self.double_unordered = True  # for tasks like paraphrase where sentence

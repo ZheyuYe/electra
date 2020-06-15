@@ -112,7 +112,8 @@ def model_fn_builder(config: configure_finetuning.FinetuningConfig, tasks,
           use_tpu=config.use_tpu,
           warmup_proportion=config.warmup_proportion,
           layerwise_lr_decay_power=config.layerwise_lr_decay,
-          n_transformer_layers=model.bert_config.num_hidden_layers
+          n_transformer_layers=model.bert_config.num_hidden_layers,
+          grad_interval=config.grad_interval,
       )
       output_spec = tf.estimator.tpu.TPUEstimatorSpec(
           mode=mode,
@@ -150,12 +151,6 @@ class ModelRunner(object):
       tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
           config.tpu_name, zone=config.tpu_zone, project=config.gcp_project)
 
-    device_map = {
-        0: 0,
-        1: 2,
-        2: 1,
-        3: 2
-    }
     device_map = {k:int(v) for k,v in enumerate(gpu_list.split(','))}
     session_config = tf.ConfigProto()
     session_config.gpu_options.visible_device_list = str(device_map[hvd.rank()])

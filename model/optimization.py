@@ -30,7 +30,7 @@ import horovod.tensorflow as hvd
 def create_optimizer(
     loss, learning_rate, num_train_steps, weight_decay_rate=0.0, use_tpu=False,
     warmup_steps=0, warmup_proportion=0, lr_decay_power=1.0,
-    layerwise_lr_decay_power=-1, n_transformer_layers=None):
+    layerwise_lr_decay_power=-1, n_transformer_layers=None, grad_interval=1):
   """Creates an optimizer and training op."""
   global_step = tf.train.get_or_create_global_step()
   learning_rate = tf.train.polynomial_decay(
@@ -58,17 +58,33 @@ def create_optimizer(
     optimizer = tf.tpu.CrossShardOptimizer(optimizer)
 
   optimizer = hvd.DistributedOptimizer(optimizer)
-
   tvars = tf.trainable_variables()
+  accum_grads = [tf.Variable(tf.zeros_like(tv.initialized_value()),
+                             trainable=False) for tv in tvars]
   grads_and_vars = optimizer.compute_gradients(loss, tvars)
   grads = [grad for grad, var in grads_and_vars]
   tvars = [var for grad, var in grads_and_vars]
+  accum_op = [accum_grad.assign_add(grad) for accum_grad, grad in
+              list(zip(accum_grads, grads))]
 
+  # This is how the model was pre-trained.
   (grads, _) = tf.clip_by_global_norm(grads, clip_norm=1.0)
-  train_op = optimizer.apply_gradients(
-      zip(grads, tvars), global_step=global_step)
+
+  with tf.get_default_graph().control_dependencies(accum_op):
+    train_op = optimizer.apply_gradients(
+      list(zip(accum_grads, tvars)), global_step=global_step)
+
+  with tf.get_default_graph().control_dependencies([train_op]):
+    zero_op = [tv.assign(tf.zeros_like(tv)) for tv in accum_grads]
+
+  with tf.get_default_graph().control_dependencies(zero_op):
+    def update_train_op():
+      return tf.group(train_op, zero_op)
+
   new_global_step = global_step + 1
-  train_op = tf.group(train_op, [global_step.assign(new_global_step)])
+  do_grad_accum = tf.equal(new_global_step % grad_interval , 0)
+  train_op = tf.cond(do_grad_accum, update_train_op, tf.no_op)
+  train_op = tf.group(accum_op, train_op, [global_step.assign(new_global_step)])
   return train_op
 
 
